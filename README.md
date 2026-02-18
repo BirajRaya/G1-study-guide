@@ -60,14 +60,7 @@ An interactive React application to help you prepare for your G1 driver's knowle
 
 ## Test Information
 
-### Knowledge Test Format
-- **40 multiple choice questions total:**
-  - 20 questions on traffic signs
-  - 20 questions on general driving knowledge
-- **Passing criteria:** Maximum 4 incorrect answers per section
-- **Fee:** $125 (includes knowledge test, first G1 road test, and driver's licence valid for 5 years)
-- **Retake fee:** $10 (after 3 working days if you fail)
-
+ $10 (after 3 working days if you fail)
 
 ## Technologies Used
 
@@ -78,10 +71,6 @@ An interactive React application to help you prepare for your G1 driver's knowle
 - Responsive design
 
 
-
-## Contributing
-
-This is a study guide application. Feel free to suggest improvements or report issues.
 
 ## License
 
