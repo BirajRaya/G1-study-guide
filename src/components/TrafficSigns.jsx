@@ -1,5 +1,13 @@
-import { useState } from "react";
-import { BookOpen, ClipboardList, RotateCcw, CheckCircle, XCircle, Trophy, ArrowLeft, Eye, EyeOff, ChevronDown, ChevronUp } from "lucide-react";
+/* eslint-disable react-refresh/only-export-components */
+/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable react-hooks/immutability */
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  BookOpen, ClipboardList, RotateCcw, CheckCircle, XCircle, Trophy,
+  ArrowLeft, Eye, EyeOff, ChevronDown, ChevronUp, Timer, Layers,
+  BarChart2, RefreshCw, ChevronLeft, ChevronRight, Award,
+  TrendingUp, AlertCircle, CheckSquare, Clock
+} from "lucide-react";
 
 // ── Shared design tokens (exported for other components) ──────────────────────
 export const C = {
@@ -15,11 +23,11 @@ export const font = "'Segoe UI', system-ui, -apple-system, sans-serif";
 export const LETTERS = ["A", "B", "C", "D"];
 
 export const stateStyles = {
-  default:  { bg: C.n100,       border: "transparent", textColor: C.n700,   letterBg: C.n300,    letterColor: C.white },
-  selected: { bg: C.primaryLight, border: C.primary,   textColor: C.primary, letterBg: C.primary, letterColor: C.white },
-  correct:  { bg: C.successBg,  border: C.success,     textColor: C.success, letterBg: C.success, letterColor: C.white },
-  wrong:    { bg: C.dangerBg,   border: C.danger,      textColor: C.danger,  letterBg: C.danger,  letterColor: C.white },
-  missed:   { bg: C.successBg,  border: C.success,     textColor: C.success, letterBg: C.success, letterColor: C.white },
+  default:  { bg: C.n100,         border: "transparent", textColor: C.n700,    letterBg: C.n300,    letterColor: C.white },
+  selected: { bg: C.primaryLight,  border: C.primary,    textColor: C.primary,  letterBg: C.primary, letterColor: C.white },
+  correct:  { bg: C.successBg,    border: C.success,     textColor: C.success,  letterBg: C.success, letterColor: C.white },
+  wrong:    { bg: C.dangerBg,     border: C.danger,      textColor: C.danger,   letterBg: C.danger,  letterColor: C.white },
+  missed:   { bg: C.successBg,    border: C.success,     textColor: C.success,  letterBg: C.success, letterColor: C.white },
 };
 
 // ── Shared Page Header ────────────────────────────────────────────────────────
@@ -123,38 +131,77 @@ const trafficSignsData = [
   { id: 77, question: "What does this sign mean?", options: ["The bridge ahead lifts or swings to allow boats to pass", "Airport", "Hotel", "Narrow road ahead"], correctAnswer: 0 },
 ];
 
+// ── Attempt Tracker ───────────────────────────────────────────────────────────
+const useAttemptTracker = () => {
+  const [attempts, setAttempts] = useState({});
+  const record = useCallback((qId, isCorrect) => {
+    setAttempts(prev => {
+      const cur = prev[qId] || { correct: 0, wrong: 0, lastResult: null };
+      return { ...prev, [qId]: { correct: cur.correct + (isCorrect ? 1 : 0), wrong: cur.wrong + (isCorrect ? 0 : 1), lastResult: isCorrect ? 'correct' : 'wrong' } };
+    });
+  }, []);
+  const reset = useCallback(() => setAttempts({}), []);
+  return { attempts, record, reset };
+};
+
+// ── Timer Hook ─────────────────────────────────────────────────────────────────
+const useTimer = (initialSeconds, onExpire) => {
+  const [timeLeft, setTimeLeft] = useState(initialSeconds);
+  const [running, setRunning] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (running && timeLeft > 0) { ref.current = setTimeout(() => setTimeLeft(t => t - 1), 1000); }
+    else if (running && timeLeft === 0) { setRunning(false); onExpire?.(); }
+    return () => clearTimeout(ref.current);
+  }, [running, timeLeft]);
+  const start = () => setRunning(true);
+  const reset = (secs) => { setRunning(false); setTimeLeft(secs ?? initialSeconds); };
+  return { timeLeft, running, start, reset };
+};
+
+const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+const TIMED_TEST_SECONDS = 20 * 60;
+
 // ── Landing ───────────────────────────────────────────────────────────────────
-function Landing({ onSelect, onBack }) {
+function Landing({ onSelect, onBack, attempts }) {
   const [hov, setHov] = useState(null);
+  const totalAttempted = Object.keys(attempts).length;
+  const totalCorrect = Object.values(attempts).filter(a => a.lastResult === 'correct').length;
+
   const cards = [
     { key: "practice", icon: <BookOpen size={26} color={C.primary} />, iconBg: "rgba(26,86,219,0.18)", bg: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", title: "Practice Mode", desc: "Browse all 77 signs with images. Click the 👁 eye icon to reveal answers when ready.", tag: "77 Signs · Self-paced", tagStyle: { background: "rgba(26,86,219,0.35)", color: "#93c5fd" } },
     { key: "test", icon: <ClipboardList size={26} color={C.white} />, iconBg: "rgba(255,255,255,0.2)", bg: "linear-gradient(135deg,#1a56db 0%,#7c3aed 100%)", border: "none", title: "Test Mode", desc: "Simulate the real G1 exam. 20 random questions — score 16/20 to pass.", tag: "20 Questions · Pass: 16/20", tagStyle: { background: "rgba(255,255,255,0.2)", color: C.white } },
+    { key: "timed", icon: <Timer size={26} color="#f59e0b" />, iconBg: "rgba(245,158,11,0.2)", bg: "rgba(255,255,255,0.05)", border: "1px solid rgba(245,158,11,0.25)", title: "Timed Test", desc: "20 minutes, 20 sign questions. Race the clock to simulate exam pressure.", tag: "20 min · Pressure Mode", tagStyle: { background: "rgba(245,158,11,0.2)", color: "#fcd34d" } },
+    { key: "flashcard", icon: <Layers size={26} color="#10b981" />, iconBg: "rgba(16,185,129,0.2)", bg: "rgba(255,255,255,0.05)", border: "1px solid rgba(16,185,129,0.25)", title: "Flashcard Mode", desc: "Flip cards to test your sign recognition — great for quick visual review.", tag: "77 Cards · Flip to reveal", tagStyle: { background: "rgba(16,185,129,0.2)", color: "#6ee7b7" } },
+    { key: "progress", icon: <BarChart2 size={26} color="#a78bfa" />, iconBg: "rgba(167,139,250,0.2)", bg: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.25)", title: "Progress Report", desc: "See your attempt history, weak spots, and overall mastery across all signs.", tag: `${totalAttempted} Tracked · ${totalCorrect} Correct`, tagStyle: { background: "rgba(167,139,250,0.2)", color: "#c4b5fd" } },
   ];
+
   return (
     <div style={{ minHeight: "100vh", background: `linear-gradient(145deg,${C.n900} 0%,#1a3460 50%,${C.n900} 100%)`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 20px", fontFamily: font, position: "relative" }}>
-      {/* Back to home */}
       <button onClick={onBack} style={{ position: "absolute", top: 24, left: 24, display: "flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8, padding: "7px 14px", cursor: "pointer", color: "rgba(255,255,255,0.75)", fontSize: "0.875rem", fontWeight: 600 }}>
         <ArrowLeft size={15} /> Home
       </button>
-
       <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", color: C.accent, padding: "5px 18px", borderRadius: "50px", fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 28 }}>🚦 Ontario G1 Prep</div>
       <h1 style={{ fontSize: "clamp(2.2rem,5vw,3.8rem)", fontWeight: 900, color: C.white, textAlign: "center", lineHeight: 1.1, letterSpacing: "-0.025em", margin: "0 0 18px" }}>Traffic Signs<br /><span style={{ color: C.accent }}>Study Hub</span></h1>
-      <p style={{ color: C.n400, fontSize: "1.05rem", textAlign: "center", margin: "0 0 52px", maxWidth: "460px", lineHeight: 1.75 }}>Master all 77 Ontario traffic signs. Study at your own pace or simulate the real G1 test experience.</p>
-      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 720 }}>
+      <p style={{ color: C.n400, fontSize: "1.05rem", textAlign: "center", margin: "0 0 44px", maxWidth: "460px", lineHeight: 1.75 }}>Master all 77 Ontario traffic signs with 5 study modes designed for the G1 exam.</p>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 900 }}>
         {cards.map(card => (
-          <div key={card.key} onClick={() => onSelect(card.key)} onMouseEnter={() => setHov(card.key)} onMouseLeave={() => setHov(null)} style={{ flex: "1 1 290px", maxWidth: 330, background: card.bg, border: card.border, borderRadius: 22, padding: "34px 28px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 14, transform: hov === card.key ? "translateY(-8px)" : "none", boxShadow: hov === card.key ? "0 24px 64px rgba(0,0,0,0.45)" : "0 4px 20px rgba(0,0,0,0.2)", transition: "transform 0.22s ease, box-shadow 0.22s ease" }}>
-            <div style={{ width: 52, height: 52, borderRadius: 14, background: card.iconBg, display: "flex", alignItems: "center", justifyContent: "center" }}>{card.icon}</div>
-            <h2 style={{ color: C.white, fontSize: "1.35rem", fontWeight: 800, margin: 0 }}>{card.title}</h2>
-            <p style={{ color: "rgba(255,255,255,0.68)", fontSize: "0.9rem", lineHeight: 1.7, margin: 0 }}>{card.desc}</p>
-            <div style={{ ...card.tagStyle, padding: "6px 14px", borderRadius: 8, fontSize: "0.8rem", fontWeight: 700, alignSelf: "flex-start", marginTop: 4 }}>{card.tag}</div>
+          <div key={card.key} onClick={() => onSelect(card.key)} onMouseEnter={() => setHov(card.key)} onMouseLeave={() => setHov(null)}
+            style={{ flex: "1 1 260px", maxWidth: 290, background: card.bg, border: card.border, borderRadius: 22, padding: "28px 24px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 12, transform: hov === card.key ? "translateY(-6px)" : "none", boxShadow: hov === card.key ? "0 20px 56px rgba(0,0,0,0.5)" : "0 4px 20px rgba(0,0,0,0.2)", transition: "transform 0.22s ease, box-shadow 0.22s ease" }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: card.iconBg, display: "flex", alignItems: "center", justifyContent: "center" }}>{card.icon}</div>
+            <h2 style={{ color: C.white, fontSize: "1.2rem", fontWeight: 800, margin: 0 }}>{card.title}</h2>
+            <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.84rem", lineHeight: 1.65, margin: 0, flex: 1 }}>{card.desc}</p>
+            <div style={{ ...card.tagStyle, padding: "5px 12px", borderRadius: 7, fontSize: "0.75rem", fontWeight: 700, alignSelf: "flex-start", marginTop: 4 }}>{card.tag}</div>
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 48, marginTop: 60 }}>
-        {[["77","Total Signs"],["20","Test Qs"],["80%","Pass Mark"]].map(([n,l]) => (
+
+      <div style={{ display: "flex", gap: 48, marginTop: 52 }}>
+        {[["77", "Total Signs"], ["20", "Test Qs"], ["80%", "Pass Mark"], [totalAttempted > 0 ? `${Math.round((totalCorrect / totalAttempted) * 100)}%` : "—", "Accuracy"]].map(([n, l]) => (
           <div key={l} style={{ textAlign: "center" }}>
-            <span style={{ display: "block", fontSize: "2.2rem", fontWeight: 900, color: C.white }}>{n}</span>
-            <span style={{ display: "block", fontSize: "0.72rem", color: C.n400, textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 4 }}>{l}</span>
+            <span style={{ display: "block", fontSize: "2rem", fontWeight: 900, color: C.white }}>{n}</span>
+            <span style={{ display: "block", fontSize: "0.68rem", color: C.n400, textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 4 }}>{l}</span>
           </div>
         ))}
       </div>
@@ -188,8 +235,7 @@ function PracticeMode({ onBack }) {
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {trafficSignsData.map(q => {
-            const open = !!expanded[q.id];
-            const shown = !!revealed[q.id];
+            const open = !!expanded[q.id]; const shown = !!revealed[q.id];
             return (
               <div key={q.id} style={{ background: C.white, border: `2px solid ${shown ? C.success : C.n200}`, borderRadius: 16, overflow: "hidden", boxShadow: shown ? "0 4px 20px rgba(5,150,105,0.1)" : "0 2px 8px rgba(0,0,0,0.04)", transition: "border-color 0.2s" }}>
                 <div onClick={() => toggleExpand(q.id)} style={{ display: "flex", alignItems: "center", padding: "14px 18px", cursor: "pointer", gap: 12 }}>
@@ -215,8 +261,7 @@ function PracticeMode({ onBack }) {
                         <p style={{ margin: "0 0 14px", color: C.n800, fontWeight: 700, fontSize: "0.95rem" }}>{q.question}</p>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           {q.options.map((opt, i) => {
-                            const correct = i === q.correctAnswer;
-                            const highlight = shown && correct;
+                            const correct = i === q.correctAnswer; const highlight = shown && correct;
                             return (
                               <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", borderRadius: 10, background: highlight ? C.successBg : C.n100, border: `1.5px solid ${highlight ? C.success : "transparent"}` }}>
                                 <div style={{ width: 26, height: 26, borderRadius: 6, background: highlight ? C.success : C.n300, color: C.white, fontWeight: 700, fontSize: "0.77rem", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{LETTERS[i]}</div>
@@ -240,8 +285,8 @@ function PracticeMode({ onBack }) {
           })}
         </div>
         <div style={{ display: "flex", justifyContent: "center", marginTop: 36 }}>
-          <button onClick={() => setShowProgress(true)} style={{ background: `linear-gradient(135deg,${C.primary} 0%,#7c3aed 100%)`, color: C.white, border: "none", padding: "14px 38px", borderRadius: "50px", fontSize: "0.97rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 6px 24px rgba(26,86,219,0.35)" }}>
-            <Trophy size={18} /> Check My Progress
+          <button onClick={() => setShowProgress(p => !p)} style={{ background: `linear-gradient(135deg,${C.primary} 0%,#7c3aed 100%)`, color: C.white, border: "none", padding: "14px 38px", borderRadius: "50px", fontSize: "0.97rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 6px 24px rgba(26,86,219,0.35)" }}>
+            <Trophy size={18} /> {showProgress ? "Hide Progress" : "Check My Progress"}
           </button>
         </div>
       </div>
@@ -249,38 +294,53 @@ function PracticeMode({ onBack }) {
   );
 }
 
-// ── Test Mode ─────────────────────────────────────────────────────────────────
-function TestMode({ onBack }) {
+// ── Shared Test Engine ────────────────────────────────────────────────────────
+function TestEngine({ onBack, timed, record }) {
   const [questions] = useState(() => [...trafficSignsData].sort(() => Math.random() - 0.5).slice(0, 20));
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [current, setCurrent] = useState(0);
   const [hovOpt, setHovOpt] = useState(null);
+  const [timeTaken, setTimeTaken] = useState(0);
+
+  const handleExpire = useCallback(() => { if (!submitted) submitTest(); }, [submitted, answers]);
+  const { timeLeft, start } = useTimer(TIMED_TEST_SECONDS, handleExpire);
+
+  useEffect(() => { if (timed && !submitted) start(); }, [timed]);
 
   const q = questions[current];
   const totalAnswered = Object.keys(answers).length;
   const score = submitted ? questions.filter(q => answers[q.id] === q.correctAnswer).length : null;
   const passed = score !== null && score >= 16;
+  const timerColor = timeLeft < 120 ? C.danger : timeLeft < 300 ? C.accent : C.success;
 
   const selectAnswer = (qId, idx) => { if (submitted) return; setAnswers(p => ({ ...p, [qId]: idx })); };
   const getState = (qId, idx) => {
-    const sel = answers[qId];
-    const correct = questions.find(q => q.id === qId)?.correctAnswer;
+    const sel = answers[qId]; const correct = questions.find(q => q.id === qId)?.correctAnswer;
     if (!submitted) return sel === idx ? "selected" : "default";
     if (idx === correct) return sel === idx ? "correct" : "missed";
     if (sel === idx) return "wrong";
     return "default";
   };
 
+  const submitTest = () => {
+    setTimeTaken(timed ? TIMED_TEST_SECONDS - timeLeft : 0);
+    questions.forEach(q => { if (answers[q.id] !== undefined) record(q.id, answers[q.id] === q.correctAnswer); });
+    setSubmitted(true);
+  };
+
   if (submitted) {
+    const unanswered = 20 - totalAnswered;
     return (
       <div style={{ minHeight: "100vh", background: C.n50, fontFamily: font }}>
-        <PageHeader title="📋 Test Results" onBack={onBack} />
+        <PageHeader title={`📋 ${timed ? "Timed Test" : "Test"} Results`} onBack={onBack} />
         <div style={{ maxWidth: 700, margin: "0 auto", padding: "32px 20px 72px" }}>
-          <div style={{ background: passed ? `linear-gradient(135deg,${C.success} 0%,#047857 100%)` : `linear-gradient(135deg,${C.danger} 0%,#991b1b 100%)`, borderRadius: 22, padding: "40px 32px", color: C.white, textAlign: "center", marginBottom: 32, boxShadow: passed ? "0 12px 40px rgba(5,150,105,0.35)" : "0 12px 40px rgba(220,38,38,0.35)" }}>
+          <div style={{ background: passed ? `linear-gradient(135deg,${C.success} 0%,#047857 100%)` : `linear-gradient(135deg,${C.danger} 0%,#991b1b 100%)`, borderRadius: 22, padding: "40px 32px", color: C.white, textAlign: "center", marginBottom: 32 }}>
             <div style={{ fontSize: "3rem", marginBottom: 8 }}>{passed ? "🎉" : "📚"}</div>
             <div style={{ fontSize: "1.8rem", fontWeight: 900, marginBottom: 4 }}>{passed ? "You Passed!" : "Keep Studying"}</div>
             <div style={{ fontSize: "4.5rem", fontWeight: 900, letterSpacing: "-0.04em", lineHeight: 1 }}>{score}/20</div>
+            {timed && timeTaken > 0 && <div style={{ opacity: 0.8, fontSize: "0.9rem", marginTop: 8 }}>⏱ Time used: {formatTime(timeTaken)}</div>}
+            {unanswered > 0 && <div style={{ opacity: 0.7, fontSize: "0.85rem", marginTop: 4 }}>({unanswered} question{unanswered !== 1 ? "s" : ""} unanswered)</div>}
             <div style={{ opacity: 0.8, fontSize: "1rem", marginTop: 10 }}>{passed ? "Outstanding! You've met the passing threshold of 16/20." : `You need ${16 - score} more correct answer${16 - score !== 1 ? "s" : ""} to pass.`}</div>
             <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 28 }}>
               <button onClick={onBack} style={{ background: "rgba(255,255,255,0.2)", border: "1.5px solid rgba(255,255,255,0.45)", color: C.white, padding: "10px 24px", borderRadius: 10, fontWeight: 700, cursor: "pointer", fontSize: "0.9rem" }}>Back</button>
@@ -291,11 +351,11 @@ function TestMode({ onBack }) {
             {questions.map((q, qi) => {
               const correct = answers[q.id] === q.correctAnswer;
               return (
-                <div key={q.id} style={{ background: C.white, borderRadius: 16, padding: 20, borderLeft: `4px solid ${correct ? C.success : C.danger}`, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
+                <div key={q.id} style={{ background: C.white, borderRadius: 16, padding: 20, borderLeft: `4px solid ${correct ? C.success : answers[q.id] === undefined ? C.n300 : C.danger}`, boxShadow: "0 2px 10px rgba(0,0,0,0.05)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                    <span style={{ background: correct ? C.successBg : C.dangerBg, color: correct ? C.success : C.danger, fontWeight: 700, fontSize: "0.73rem", padding: "3px 9px", borderRadius: 6 }}>Q{qi + 1}</span>
-                    {correct ? <CheckCircle size={15} color={C.success} /> : <XCircle size={15} color={C.danger} />}
-                    <span style={{ fontSize: "0.8rem", color: correct ? C.success : C.danger, fontWeight: 600 }}>{correct ? "Correct" : "Incorrect"}</span>
+                    <span style={{ background: correct ? C.successBg : answers[q.id] === undefined ? C.n100 : C.dangerBg, color: correct ? C.success : answers[q.id] === undefined ? C.n400 : C.danger, fontWeight: 700, fontSize: "0.73rem", padding: "3px 9px", borderRadius: 6 }}>Q{qi + 1}</span>
+                    {answers[q.id] === undefined ? <AlertCircle size={15} color={C.n400} /> : correct ? <CheckCircle size={15} color={C.success} /> : <XCircle size={15} color={C.danger} />}
+                    <span style={{ fontSize: "0.8rem", color: correct ? C.success : answers[q.id] === undefined ? C.n400 : C.danger, fontWeight: 600 }}>{answers[q.id] === undefined ? "Unanswered" : correct ? "Correct" : "Incorrect"}</span>
                   </div>
                   <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12 }}>
                     <div style={{ width: 72, height: 72, background: C.n100, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -328,7 +388,20 @@ function TestMode({ onBack }) {
 
   return (
     <div style={{ minHeight: "100vh", background: C.n50, fontFamily: font }}>
-      <PageHeader title="📋 Test Mode" onBack={onBack} rightEl={<div style={{ background: C.primaryLight, color: C.primary, fontWeight: 700, fontSize: "0.82rem", padding: "6px 14px", borderRadius: "50px" }}>{totalAnswered}/20 answered</div>} />
+      <PageHeader
+        title={`📋 ${timed ? "⏱ Timed " : ""}Test Mode`}
+        onBack={onBack}
+        rightEl={
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {timed && (
+              <div style={{ background: timeLeft < 120 ? C.dangerBg : timeLeft < 300 ? "rgba(245,158,11,0.1)" : C.successBg, color: timerColor, fontWeight: 800, fontSize: "1rem", padding: "5px 14px", borderRadius: "50px", border: `1.5px solid ${timerColor}`, display: "flex", alignItems: "center", gap: 6 }}>
+                <Clock size={14} /> {formatTime(timeLeft)}
+              </div>
+            )}
+            <div style={{ background: C.primaryLight, color: C.primary, fontWeight: 700, fontSize: "0.82rem", padding: "6px 14px", borderRadius: "50px" }}>{totalAnswered}/20 answered</div>
+          </div>
+        }
+      />
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px 80px" }}>
         <div style={{ display: "flex", gap: 5, marginBottom: 24 }}>
           {questions.map((_, i) => {
@@ -365,9 +438,316 @@ function TestMode({ onBack }) {
         </div>
         <div style={{ textAlign: "center" }}>
           {totalAnswered === 20
-            ? <button onClick={() => setSubmitted(true)} style={{ background: `linear-gradient(135deg,${C.primary} 0%,#7c3aed 100%)`, color: C.white, border: "none", padding: "15px 44px", borderRadius: "50px", fontSize: "1rem", fontWeight: 800, cursor: "pointer", boxShadow: "0 8px 28px rgba(26,86,219,0.38)" }}>Submit Test — See Results</button>
-            : <p style={{ color: C.n400, fontSize: "0.85rem" }}>Answer all 20 questions to submit · {20 - totalAnswered} remaining</p>
+            ? <button onClick={submitTest} style={{ background: `linear-gradient(135deg,${C.primary} 0%,#7c3aed 100%)`, color: C.white, border: "none", padding: "15px 44px", borderRadius: "50px", fontSize: "1rem", fontWeight: 800, cursor: "pointer", boxShadow: "0 8px 28px rgba(26,86,219,0.38)" }}>Submit Test — See Results</button>
+            : <div>
+                <p style={{ color: C.n400, fontSize: "0.85rem", margin: "0 0 12px" }}>Answer all 20 questions to submit · {20 - totalAnswered} remaining</p>
+                {timed && <button onClick={submitTest} style={{ background: C.n100, border: `1px solid ${C.n200}`, color: C.n500, padding: "10px 24px", borderRadius: "50px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" }}>Submit anyway ({totalAnswered}/20 answered)</button>}
+              </div>
           }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Flashcard Mode ─────────────────────────────────────────────────────────────
+function FlashcardMode({ onBack, record }) {
+  const [deck] = useState(() => [...trafficSignsData].sort(() => Math.random() - 0.5));
+  const [index, setIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [answered, setAnswered] = useState({});
+  const [filter, setFilter] = useState("all");
+  const [animDir, setAnimDir] = useState(null);
+
+  const filtered = deck.filter(q => {
+    if (filter === "wrong") return answered[q.id] === "wrong";
+    if (filter === "unanswered") return !answered[q.id];
+    return true;
+  });
+  const total = filtered.length;
+  const card = filtered[Math.min(index, total - 1)];
+  const correctCount = Object.values(answered).filter(v => v === "correct").length;
+  const wrongCount = Object.values(answered).filter(v => v === "wrong").length;
+
+  const navigate = (dir) => {
+    setAnimDir(dir);
+    setTimeout(() => {
+      setFlipped(false);
+      setIndex(i => dir === "next" ? Math.min(i + 1, total - 1) : Math.max(i - 1, 0));
+      setAnimDir(null);
+    }, 180);
+  };
+
+  const handleAnswer = (correct) => {
+    const q = filtered[index];
+    setAnswered(p => ({ ...p, [q.id]: correct ? "correct" : "wrong" }));
+    record(q.id, correct);
+    if (index < total - 1) navigate("next");
+    else setFlipped(false);
+  };
+
+  if (!card) return (
+    <div style={{ minHeight: "100vh", background: C.n50, fontFamily: font }}>
+      <PageHeader title="🃏 Flashcard Mode" onBack={onBack} />
+      <div style={{ maxWidth: 600, margin: "80px auto", padding: "0 20px", textAlign: "center" }}>
+        <div style={{ fontSize: "4rem", marginBottom: 16 }}>✅</div>
+        <h2 style={{ color: C.n800, fontWeight: 800 }}>No cards in this filter!</h2>
+        <button onClick={() => { setFilter("all"); setIndex(0); }} style={{ marginTop: 20, background: C.primary, color: C.white, border: "none", padding: "12px 28px", borderRadius: 12, fontWeight: 700, cursor: "pointer" }}>Show All Cards</button>
+      </div>
+    </div>
+  );
+
+  const progress = total > 0 ? ((index + 1) / total) * 100 : 0;
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.n50, fontFamily: font }}>
+      <PageHeader
+        title="🃏 Flashcard Mode"
+        onBack={onBack}
+        rightEl={
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ background: C.successBg, color: C.success, fontWeight: 700, fontSize: "0.78rem", padding: "4px 11px", borderRadius: "50px" }}>✓ {correctCount}</div>
+            <div style={{ background: C.dangerBg, color: C.danger, fontWeight: 700, fontSize: "0.78rem", padding: "4px 11px", borderRadius: "50px" }}>✗ {wrongCount}</div>
+          </div>
+        }
+      />
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px 80px" }}>
+        {/* Filter tabs */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 24, background: C.white, padding: 6, borderRadius: 12, border: `1px solid ${C.n200}` }}>
+          {[["all", "All Cards", trafficSignsData.length], ["unanswered", "Unanswered", trafficSignsData.length - Object.keys(answered).length], ["wrong", "Need Review", wrongCount]].map(([key, label, count]) => (
+            <button key={key} onClick={() => { setFilter(key); setIndex(0); setFlipped(false); }} style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "none", background: filter === key ? C.primary : "transparent", color: filter === key ? C.white : C.n500, fontWeight: 700, fontSize: "0.8rem", cursor: "pointer", transition: "all 0.15s" }}>
+              {label} <span style={{ opacity: 0.7 }}>({count})</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ height: 6, background: C.n200, borderRadius: 6, marginBottom: 20, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${progress}%`, background: `linear-gradient(90deg,${C.primary},#7c3aed)`, borderRadius: 6, transition: "width 0.3s ease" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+          <span style={{ color: C.n500, fontSize: "0.82rem", fontWeight: 600 }}>Card {Math.min(index + 1, total)} of {total}</span>
+          <span style={{ color: C.n400, fontSize: "0.82rem" }}>Click card to flip</span>
+        </div>
+
+        {/* Card */}
+        <div
+          onClick={() => setFlipped(f => !f)}
+          style={{
+            minHeight: 320, borderRadius: 24, padding: "36px 32px",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.1)", cursor: "pointer",
+            display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
+            textAlign: "center", gap: 18, marginBottom: 24,
+            border: `2px solid ${flipped ? C.success : C.n200}`,
+            opacity: animDir ? 0 : 1,
+            transform: animDir === "next" ? "translateX(-20px)" : animDir === "prev" ? "translateX(20px)" : "translateX(0)",
+            transition: "opacity 0.18s, transform 0.18s, border-color 0.2s",
+            background: flipped ? `linear-gradient(135deg,${C.successBg} 0%,#d1fae5 100%)` : C.white,
+          }}
+        >
+          {!flipped ? (
+            <>
+              <div style={{ background: C.primaryLight, color: C.primary, fontWeight: 700, fontSize: "0.72rem", padding: "4px 12px", borderRadius: 6 }}>SIGN #{card.id} — IDENTIFY</div>
+              {/* Sign image front */}
+              <div style={{ width: 150, height: 150, background: C.n100, borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <SignImage id={card.id} size={130} />
+              </div>
+              <p style={{ fontSize: "1.05rem", fontWeight: 700, color: C.n800, margin: 0, maxWidth: 420 }}>{card.question}</p>
+              {/* Options preview */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 7, width: "100%", maxWidth: 400 }}>
+                {card.options.map((opt, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 13px", borderRadius: 10, background: C.n100, textAlign: "left" }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 6, background: C.n300, color: C.white, fontWeight: 700, fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{LETTERS[i]}</div>
+                    <span style={{ color: C.n700, fontSize: "0.86rem" }}>{opt}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ color: C.n400, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: 5 }}>
+                <RefreshCw size={13} /> Tap to reveal answer
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ background: C.successBg, color: C.success, fontWeight: 700, fontSize: "0.72rem", padding: "4px 12px", borderRadius: 6 }}>✓ ANSWER</div>
+              <div style={{ width: 80, height: 80, background: C.n100, borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <SignImage id={card.id} size={70} />
+              </div>
+              <div style={{ width: 52, height: 52, borderRadius: 14, background: C.success, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <CheckCircle size={28} color={C.white} />
+              </div>
+              <p style={{ fontSize: "1.15rem", fontWeight: 800, color: C.success, margin: 0, maxWidth: 440 }}>{card.options[card.correctAnswer]}</p>
+              <p style={{ fontSize: "0.85rem", color: C.n600, margin: 0 }}>
+                Option <strong>{LETTERS[card.correctAnswer]}</strong>
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Answer buttons */}
+        {flipped && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+            <button onClick={() => handleAnswer(false)} style={{ flex: 1, padding: "14px", borderRadius: 14, border: `2px solid ${C.danger}`, background: C.dangerBg, color: C.danger, fontWeight: 700, fontSize: "0.9rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <XCircle size={18} /> Got it Wrong
+            </button>
+            <button onClick={() => handleAnswer(true)} style={{ flex: 1, padding: "14px", borderRadius: 14, border: `2px solid ${C.success}`, background: C.successBg, color: C.success, fontWeight: 700, fontSize: "0.9rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <CheckCircle size={18} /> Got it Right!
+            </button>
+          </div>
+        )}
+
+        {/* Navigation */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 12, alignItems: "center" }}>
+          <button onClick={() => navigate("prev")} disabled={index === 0} style={{ width: 44, height: 44, borderRadius: 10, border: `1px solid ${C.n200}`, background: index === 0 ? C.n100 : C.white, color: index === 0 ? C.n300 : C.n700, cursor: index === 0 ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <ChevronLeft size={20} />
+          </button>
+          <button onClick={() => { setIndex(0); setFlipped(false); }} style={{ padding: "10px 20px", borderRadius: 10, border: `1px solid ${C.n200}`, background: C.white, color: C.n600, fontWeight: 600, fontSize: "0.84rem", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            <RefreshCw size={14} /> Restart
+          </button>
+          <button onClick={() => navigate("next")} disabled={index >= total - 1} style={{ width: 44, height: 44, borderRadius: 10, border: `1px solid ${C.n200}`, background: index >= total - 1 ? C.n100 : C.white, color: index >= total - 1 ? C.n300 : C.n700, cursor: index >= total - 1 ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <ChevronRight size={20} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Progress Report ───────────────────────────────────────────────────────────
+function ProgressReport({ onBack, attempts, onReset }) {
+  const [filter, setFilter] = useState("all");
+
+  const total = trafficSignsData.length;
+  const attempted = Object.keys(attempts).length;
+  const correct = Object.values(attempts).filter(a => a.lastResult === "correct").length;
+  const wrong = Object.values(attempts).filter(a => a.lastResult === "wrong").length;
+  const unattempted = total - attempted;
+  const accuracy = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+
+  const weakSpots = trafficSignsData
+    .filter(q => attempts[q.id] && attempts[q.id].wrong > 0)
+    .sort((a, b) => (attempts[b.id]?.wrong || 0) - (attempts[a.id]?.wrong || 0))
+    .slice(0, 5);
+
+  const filteredQs = trafficSignsData.filter(q => {
+    if (filter === "correct") return attempts[q.id]?.lastResult === "correct";
+    if (filter === "wrong") return attempts[q.id]?.lastResult === "wrong";
+    if (filter === "unattempted") return !attempts[q.id];
+    return true;
+  });
+
+  const masteryColor = accuracy >= 80 ? C.success : accuracy >= 60 ? C.accent : C.danger;
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.n50, fontFamily: font }}>
+      <PageHeader
+        title="📊 Progress Report"
+        onBack={onBack}
+        rightEl={
+          <button onClick={onReset} style={{ display: "flex", alignItems: "center", gap: 6, background: C.dangerBg, border: `1px solid ${C.danger}`, color: C.danger, padding: "6px 14px", borderRadius: 8, fontWeight: 600, fontSize: "0.8rem", cursor: "pointer" }}>
+            <RotateCcw size={13} /> Reset Data
+          </button>
+        }
+      />
+      <div style={{ maxWidth: 800, margin: "0 auto", padding: "32px 20px 72px" }}>
+
+        {/* Hero stats */}
+        <div style={{ background: `linear-gradient(135deg,${C.n900} 0%,#1a3460 100%)`, borderRadius: 22, padding: "32px 28px", color: C.white, marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+            <div style={{ width: 70, height: 70, borderRadius: 18, background: masteryColor, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Award size={36} color={C.white} />
+            </div>
+            <div>
+              <div style={{ fontSize: "0.75rem", opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.1em" }}>Overall Accuracy</div>
+              <div style={{ fontSize: "3rem", fontWeight: 900, lineHeight: 1, color: masteryColor }}>{accuracy}%</div>
+              <div style={{ fontSize: "0.85rem", opacity: 0.7, marginTop: 2 }}>{attempted} of {total} signs attempted</div>
+            </div>
+          </div>
+          <div style={{ marginBottom: 8, fontSize: "0.75rem", opacity: 0.65, display: "flex", justifyContent: "space-between" }}>
+            <span>Progress to mastery (80%)</span><span>{accuracy}%</span>
+          </div>
+          <div style={{ height: 10, borderRadius: 10, background: "rgba(255,255,255,0.15)", overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${accuracy}%`, background: masteryColor, borderRadius: 10, transition: "width 0.8s ease" }} />
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
+            {[{ label: "Correct", value: correct, color: "#34d399", bg: "rgba(52,211,153,0.15)" }, { label: "Wrong", value: wrong, color: "#f87171", bg: "rgba(248,113,113,0.15)" }, { label: "Unattempted", value: unattempted, color: "#94a3b8", bg: "rgba(148,163,184,0.15)" }, { label: "Total Signs", value: total, color: "#c4b5fd", bg: "rgba(196,181,253,0.15)" }].map(s => (
+              <div key={s.label} style={{ flex: "1 1 80px", background: s.bg, borderRadius: 12, padding: "12px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: "1.6rem", fontWeight: 900, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.55)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Weak spots */}
+        {weakSpots.length > 0 && (
+          <div style={{ background: C.white, borderRadius: 18, padding: "22px 22px", marginBottom: 24, border: `1px solid ${C.dangerBg}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <TrendingUp size={18} color={C.danger} />
+              <h3 style={{ margin: 0, color: C.n800, fontWeight: 800, fontSize: "1rem" }}>Weak Spots — Focus Here</h3>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {weakSpots.map(q => {
+                const a = attempts[q.id];
+                const total_a = a.correct + a.wrong;
+                const pct = Math.round((a.wrong / total_a) * 100);
+                return (
+                  <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: C.dangerBg, borderRadius: 10 }}>
+                    <div style={{ width: 44, height: 44, background: C.n100, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <SignImage id={q.id} size={38} />
+                    </div>
+                    <span style={{ background: C.danger, color: C.white, fontWeight: 700, fontSize: "0.7rem", padding: "3px 8px", borderRadius: 5, flexShrink: 0 }}>Q{q.id}</span>
+                    <span style={{ flex: 1, color: C.n700, fontSize: "0.87rem", lineHeight: 1.4 }}>{q.options[q.correctAnswer]}</span>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: "1rem", fontWeight: 800, color: C.danger }}>{pct}%</div>
+                      <div style={{ fontSize: "0.68rem", color: C.n400 }}>error rate</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Filter + question list */}
+        <div style={{ background: C.white, borderRadius: 18, padding: "20px 20px", border: `1px solid ${C.n200}` }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 18, background: C.n50, padding: 5, borderRadius: 10 }}>
+            {[["all", "All", total], ["correct", "✓ Correct", correct], ["wrong", "✗ Wrong", wrong], ["unattempted", "Not Tried", unattempted]].map(([key, label, count]) => (
+              <button key={key} onClick={() => setFilter(key)} style={{ flex: 1, padding: "7px 8px", borderRadius: 7, border: "none", background: filter === key ? C.primary : "transparent", color: filter === key ? C.white : C.n500, fontWeight: 700, fontSize: "0.75rem", cursor: "pointer", transition: "all 0.15s" }}>
+                {label} ({count})
+              </button>
+            ))}
+          </div>
+          {filteredQs.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: C.n400 }}>
+              <CheckSquare size={32} style={{ marginBottom: 12 }} />
+              <p style={{ fontWeight: 600 }}>No signs in this category yet</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filteredQs.map(q => {
+                const a = attempts[q.id];
+                const status = !a ? "unattempted" : a.lastResult;
+                const statusColor = status === "correct" ? C.success : status === "wrong" ? C.danger : C.n400;
+                const statusBg = status === "correct" ? C.successBg : status === "wrong" ? C.dangerBg : C.n100;
+                return (
+                  <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", background: statusBg, borderRadius: 10, border: `1px solid ${status === "correct" ? "rgba(5,150,105,0.15)" : status === "wrong" ? "rgba(220,38,38,0.15)" : C.n200}` }}>
+                    <div style={{ width: 38, height: 38, background: C.white, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, border: `1px solid ${C.n200}` }}>
+                      <SignImage id={q.id} size={32} />
+                    </div>
+                    <span style={{ background: statusColor, color: C.white, fontWeight: 700, fontSize: "0.7rem", padding: "3px 8px", borderRadius: 5, flexShrink: 0 }}>Q{q.id}</span>
+                    <span style={{ flex: 1, color: C.n700, fontSize: "0.86rem", lineHeight: 1.4 }}>{q.options[q.correctAnswer]}</span>
+                    {a && (
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                        {a.correct > 0 && <span style={{ background: C.successBg, color: C.success, fontWeight: 700, fontSize: "0.68rem", padding: "2px 7px", borderRadius: 5 }}>✓{a.correct}</span>}
+                        {a.wrong > 0 && <span style={{ background: C.dangerBg, color: C.danger, fontWeight: 700, fontSize: "0.68rem", padding: "2px 7px", borderRadius: 5 }}>✗{a.wrong}</span>}
+                      </div>
+                    )}
+                    {!a && <span style={{ color: C.n400, fontSize: "0.72rem" }}>—</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -377,7 +757,12 @@ function TestMode({ onBack }) {
 // ── Root ──────────────────────────────────────────────────────────────────────
 export default function TrafficSigns({ onBack }) {
   const [mode, setMode] = useState("home");
+  const { attempts, record, reset } = useAttemptTracker();
+
   if (mode === "practice") return <PracticeMode onBack={() => setMode("home")} />;
-  if (mode === "test") return <TestMode onBack={() => setMode("home")} />;
-  return <Landing onSelect={setMode} onBack={onBack} />;
+  if (mode === "test") return <TestEngine onBack={() => setMode("home")} timed={false} record={record} />;
+  if (mode === "timed") return <TestEngine onBack={() => setMode("home")} timed={true} record={record} />;
+  if (mode === "flashcard") return <FlashcardMode onBack={() => setMode("home")} record={record} />;
+  if (mode === "progress") return <ProgressReport onBack={() => setMode("home")} attempts={attempts} onReset={reset} />;
+  return <Landing onSelect={setMode} onBack={onBack} attempts={attempts} />;
 }

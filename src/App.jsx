@@ -7,7 +7,7 @@ import { ChevronRight } from "lucide-react";
 
 const sections = [
   { key: "traffic-signs", label: "Traffic Signs", emoji: "🚦", count: "77 Questions" },
-  { key: "rules", label: "Rules of the Road", emoji: "📖", count: "50+ Questions" },
+  { key: "rules", label: "Rules of the Road", emoji: "📖", count: "123 Questions" },
   { key: "demerit", label: "Demerit Points", emoji: "⚠️", count: "Reference Guide" },
 ];
 
